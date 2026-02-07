@@ -5,13 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Andrew Ang | Info</title>
     <link rel="stylesheet" href="styles.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
 </head>
 <body>
+    <canvas id="physics-canvas"></canvas>
     <header>
         <div class="logo">ANDREW ANG</div>
         <nav>
+            <a href="#">Blog</a>
             <a href="mailto:andrew_ang@live.com">Contact</a>
-            <a href="https://voxelvoxelvoxel.github.io/blog/">Blog</a>
         </nav>
     </header>
 
@@ -345,5 +347,197 @@
              </div>
         </section>
     </main>
+
+    <script>
+        // Physics explosion when scrolling past bottom
+        const canvas = document.getElementById('physics-canvas');
+        const ctx = canvas.getContext('2d');
+        let engine, world, physicsElements = [];
+        let physicsActive = false;
+        let hasTriggered = false;
+
+        // Setup canvas
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        // Initialize Matter.js
+        const Engine = Matter.Engine;
+        const World = Matter.World;
+        const Bodies = Matter.Bodies;
+        const Body = Matter.Body;
+        const Runner = Matter.Runner;
+
+        engine = Engine.create();
+        world = engine.world;
+        world.gravity.y = 0.5;
+
+        // Detect scroll to bottom
+        function checkScroll() {
+            if (hasTriggered) return;
+            
+            const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+            const scrollHeight = document.documentElement.scrollHeight;
+            const clientHeight = document.documentElement.clientHeight;
+            
+            // Trigger when scrolled past 95% of the page
+            if (scrollTop + clientHeight >= scrollHeight * 0.95) {
+                triggerExplosion();
+                hasTriggered = true;
+            }
+        }
+
+        window.addEventListener('scroll', checkScroll);
+
+        function triggerExplosion() {
+            physicsActive = true;
+            canvas.style.display = 'block';
+            
+            // Get all text elements
+            const elements = document.querySelectorAll('h1, h2, h3, p, span, a, div.label, div.logo');
+            
+            elements.forEach(el => {
+                const rect = el.getBoundingClientRect();
+                const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+                
+                // Skip if too small or invisible
+                if (rect.width < 5 || rect.height < 5) return;
+                
+                // Create physics body for each element
+                const x = rect.left + rect.width / 2;
+                const y = rect.top + scrollTop + rect.height / 2;
+                
+                const body = Bodies.rectangle(x, y, rect.width, rect.height, {
+                    restitution: 0.6,
+                    friction: 0.1,
+                    density: 0.001
+                });
+                
+                // Apply random explosion force from center of screen
+                const centerX = window.innerWidth / 2;
+                const centerY = window.innerHeight / 2;
+                const angle = Math.atan2(y - scrollTop - centerY, x - centerX);
+                const forceMagnitude = 0.05 + Math.random() * 0.15;
+                
+                Body.applyForce(body, {x: x, y: y}, {
+                    x: Math.cos(angle) * forceMagnitude,
+                    y: Math.sin(angle) * forceMagnitude
+                });
+                
+                // Add some random rotation
+                Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.3);
+                
+                // Store element info
+                physicsElements.push({
+                    body: body,
+                    element: el,
+                    text: el.innerText || el.textContent,
+                    style: window.getComputedStyle(el),
+                    rect: rect
+                });
+                
+                World.add(world, body);
+                
+                // Hide original element
+                el.style.opacity = '0';
+            });
+            
+            // Start physics engine
+            const runner = Runner.create();
+            Runner.run(runner, engine);
+            
+            // Start render loop
+            animate();
+        }
+
+        function animate() {
+            if (!physicsActive) return;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+            
+            // Draw each physics element
+            physicsElements.forEach(item => {
+                const pos = item.body.position;
+                const angle = item.body.angle;
+                
+                ctx.save();
+                ctx.translate(pos.x, pos.y - scrollTop);
+                ctx.rotate(angle);
+                
+                // Set text style
+                const fontSize = item.style.fontSize;
+                const fontFamily = item.style.fontFamily;
+                const color = item.style.color;
+                const fontWeight = item.style.fontWeight;
+                const textTransform = item.style.textTransform;
+                
+                ctx.font = `${fontWeight} ${fontSize} ${fontFamily}`;
+                ctx.fillStyle = color;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                
+                // Truncate very long text
+                let displayText = item.text.trim();
+                if (displayText.length > 100) {
+                    displayText = displayText.substring(0, 100) + '...';
+                }
+                
+                if (textTransform === 'uppercase') {
+                    displayText = displayText.toUpperCase();
+                }
+                
+                // Handle multi-line text
+                const maxWidth = item.rect.width;
+                const words = displayText.split(' ');
+                let line = '';
+                let lines = [];
+                
+                words.forEach(word => {
+                    const testLine = line + word + ' ';
+                    const metrics = ctx.measureText(testLine);
+                    if (metrics.width > maxWidth && line !== '') {
+                        lines.push(line);
+                        line = word + ' ';
+                    } else {
+                        line = testLine;
+                    }
+                });
+                lines.push(line);
+                
+                // Only show first 3 lines
+                lines = lines.slice(0, 3);
+                
+                const lineHeight = parseFloat(fontSize) * 1.2;
+                const totalHeight = lines.length * lineHeight;
+                let yOffset = -totalHeight / 2;
+                
+                lines.forEach(line => {
+                    ctx.fillText(line.trim(), 0, yOffset);
+                    yOffset += lineHeight;
+                });
+                
+                ctx.restore();
+            });
+            
+            requestAnimationFrame(animate);
+        }
+
+        // Optional: Reset on scroll to top
+        window.addEventListener('scroll', () => {
+            if (hasTriggered) {
+                const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+                if (scrollTop < 100) {
+                    // Reset
+                    location.reload();
+                }
+            }
+        });
+    </script>
 </body>
 </html>
